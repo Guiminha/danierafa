@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="theme-color" content="#1a1a1a">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <title>Danielle &amp; Rafael — 06 de Setembro de 2026</title>
+  <meta name="description" content="Envie as fotos e vídeos que você tirou no nosso casamento. Danielle & Rafael — 06.09.2026">
+  <link rel="stylesheet" href="css/styles.css">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>💍</text></svg>">
+</head>
+<body>
+
+  <header class="cover">
+    <div class="cover-photo" role="img" aria-label="Foto do casal"></div>
+    <div class="cover-overlay"></div>
+    <div class="cover-title">
+      <p class="cover-eyebrow">Nosso casamento</p>
+      <h1 class="cover-names">Danielle &amp; Rafael</h1>
+      <p class="cover-date">06 · 09 · 2026</p>
+    </div>
+  </header>
+
+  <main class="content">
+    <section class="gallery-section">
+      <div class="gallery-header">
+        <h2>Compartilhe seus momentos com a gente!</h2>
+        <p class="gallery-count" id="gallery-count"></p>
+      </div>
+      <div class="gallery" id="gallery"></div>
+      <p class="gallery-empty" id="gallery-empty" hidden>
+        Nenhuma foto ou vídeo por aqui ainda.
+        Seja o primeiro a compartilhar!
+      </p>
+    </section>
+  </main>
+
+  <div class="upload-bar">
+    <button type="button" class="upload-btn" id="upload-btn" aria-label="Enviar fotos e vídeos">
+      <svg class="upload-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+        <polyline points="17 8 12 3 7 8"/>
+        <line x1="12" y1="3" x2="12" y2="15"/>
+      </svg>
+      <span class="upload-label">Enviar fotos e vídeos</span>
+      <span class="upload-hint">toque para escolher</span>
+    </button>
+    <input type="file" id="file-input" accept="image/*,video/*" multiple hidden>
+  </div>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+  <script src="js/app.js"></script>
+</body>
+</html>
