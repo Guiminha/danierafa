@@ -68,8 +68,8 @@ app.post('/api/upload-url', async (req, res) => {
     policy.setContentType(type);
     policy.setContentLengthRange(1, MAX_FILE_MB * 1024 * 1024);
 
-    const postURL = await minioClient.presignedPostPolicy(policy);
-    res.json({ postURL, objectName });
+    const signed = await minioClient.presignedPostPolicy(policy);
+    res.json({ postURL: { url: signed.postURL, formData: signed.formData }, objectName });
   } catch (err) {
     console.error('Erro ao gerar URL de upload:', err);
     res.status(500).json({ error: 'Erro interno ao preparar o upload.' });
