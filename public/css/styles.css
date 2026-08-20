@@ -1,12 +1,13 @@
 :root {
-  --bg: #111214;
-  --surface: #1c1e21;
-  --surface-2: #26292e;
-  --text: #f5f5f4;
-  --text-dim: #a8a29e;
-  --accent: #e879f9;
-  --accent-dark: #a21caf;
-  --gradient: linear-gradient(135deg, #e879f9 0%, #f472b6 50%, #fb923c 100%);
+  --bg: #000000;
+  --surface: #141414;
+  --surface-2: #1f1f1f;
+  --text: #ffffff;
+  --text-dim: #a3a3a3;
+  --accent: #81ACD6;
+  --accent-dark: #628EBB;
+  --accent-light: #A4CBEF;
+  --gradient: linear-gradient(135deg, #A4CBEF 0%, #81ACD6 50%, #628EBB 100%);
   --safe-bottom: env(safe-area-inset-bottom, 0px);
 }
 
@@ -62,7 +63,7 @@ button {
 .cover-photo {
   position: absolute;
   inset: 0;
-  background: url("../img/cover.svg") center / cover no-repeat;
+  background: url("../img/cover.jpg") center / cover no-repeat;
   background-color: var(--surface-2);
 }
 
@@ -108,7 +109,7 @@ button {
   font-size: clamp(0.8rem, 3vw, 1rem);
   letter-spacing: 0.3em;
   text-transform: uppercase;
-  color: #fde68a;
+  color: var(--accent-light);
   font-weight: 600;
 }
 
@@ -263,7 +264,7 @@ button {
   border-radius: 18px;
   background: var(--gradient);
   color: #fff;
-  box-shadow: 0 10px 32px rgba(168, 85, 247, 0.45), 0 2px 8px rgba(0, 0, 0, 0.35);
+  box-shadow: 0 10px 32px rgba(129, 172, 214, 0.45), 0 2px 8px rgba(0, 0, 0, 0.35);
   transition: transform 0.15s ease, box-shadow 0.15s ease, opacity 0.15s ease;
   min-height: 64px;
 }
