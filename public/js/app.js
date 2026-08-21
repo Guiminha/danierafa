@@ -10,7 +10,7 @@
   const toastEl = document.getElementById('toast');
 
   let galleryItems = [];
-  let refreshTimer = null;
+  let galleryFingerprint = '';
 
   const IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/heic', 'image/heif', 'image/avif', 'image/bmp', 'image/tiff'];
   const VIDEO_TYPES = ['video/mp4', 'video/quicktime', 'video/x-m4v', 'video/webm', 'video/x-msvideo', 'video/x-matroska', 'video/3gpp', 'video/mpeg'];
@@ -18,8 +18,7 @@
   const canPreview = (kind, name) => {
     const ext = (name.split('.').pop() || '').toLowerCase();
     if (kind === 'image') {
-      return ['jpg', 'jpeg', 'png', 'gif', 'webp', 'avif', 'bmp'].includes(ext) ||
-        (IMAGE_TYPES.includes(kind) && !['heic', 'heif', 'tif', 'tiff'].includes(ext));
+      return ['jpg', 'jpeg', 'png', 'gif', 'webp', 'avif', 'bmp'].includes(ext);
     }
     return ['mp4', 'webm', 'mov', 'm4v', '3gp', 'mpeg', 'mpg', 'avi', 'mkv'].includes(ext);
   };
@@ -49,7 +48,7 @@
 
     if (item.kind === 'image' && canPreview('image', baseName)) {
       const img = document.createElement('img');
-      img.src = item.url;
+      img.src = item.thumbUrl || item.url;
       img.alt = 'Foto enviada pelos convidados';
       img.loading = 'lazy';
       img.decoding = 'async';
@@ -88,12 +87,20 @@
     return wrap;
   }
 
+  function computeFingerprint(items) {
+    return items.length + ':' + (items[0] ? items[0].name : '') + ':' + (items[items.length - 1] ? items[items.length - 1].name : '');
+  }
+
   async function loadGallery() {
     try {
       const res = await fetch('/api/photos');
       if (!res.ok) throw new Error();
       const data = await res.json();
-      galleryItems = data.items || [];
+      const newItems = data.items || [];
+      const newFingerprint = computeFingerprint(newItems);
+      if (newFingerprint === galleryFingerprint) return;
+      galleryItems = newItems;
+      galleryFingerprint = newFingerprint;
       renderGallery();
     } catch (err) {
       showToast('Não foi possível carregar a galeria.', 'error');
@@ -120,6 +127,35 @@
     const frag = document.createDocumentFragment();
     for (const s of skeletonItems(9)) frag.appendChild(s);
     galleryEl.appendChild(frag);
+  }
+
+  /* ---------- Thumbnails ---------- */
+
+  function generateThumbnail(file) {
+    return new Promise((resolve) => {
+      if (!file.type.startsWith('image/')) return resolve(null);
+
+      const img = new Image();
+      const url = URL.createObjectURL(file);
+      img.onload = () => {
+        const size = 300;
+        const canvas = document.createElement('canvas');
+        canvas.width = size;
+        canvas.height = size;
+        const ctx = canvas.getContext('2d');
+        const scale = Math.max(size / img.width, size / img.height);
+        const x = (size - img.width * scale) / 2;
+        const y = (size - img.height * scale) / 2;
+        ctx.drawImage(img, x, y, img.width * scale, img.height * scale);
+        URL.revokeObjectURL(url);
+        canvas.toBlob((blob) => resolve(blob), 'image/jpeg', 0.8);
+      };
+      img.onerror = () => {
+        URL.revokeObjectURL(url);
+        resolve(null);
+      };
+      img.src = url;
+    });
   }
 
   /* ---------- Upload ---------- */
@@ -163,24 +199,26 @@
     return data;
   }
 
-  function uploadFile(file, postURL) {
+  function xhrUpload(url, file) {
     return new Promise((resolve, reject) => {
       const xhr = new XMLHttpRequest();
-      xhr.open('POST', postURL.url);
+      xhr.open('POST', url);
       xhr.upload.addEventListener('progress', (e) => {
-        if (e.lengthComputable && resolve.onProgress) {
-          resolve.onProgress(e.loaded / e.total);
+        if (e.lengthComputable && xhr._onProgress) {
+          xhr._onProgress(e.loaded / e.total);
         }
       });
       xhr.onload = () => resolve(xhr.status >= 200 && xhr.status < 300);
       xhr.onerror = () => reject(new Error('Falha de rede ao enviar.'));
-      const fd = new FormData();
-      for (const key of Object.keys(postURL.formData)) {
-        fd.append(key, postURL.formData[key]);
-      }
-      fd.append('file', file);
-      xhr.send(fd);
+      xhr.send(file);
     });
+  }
+
+  function presignedUpload(postURL, blob, fileName, contentType) {
+    const form = new FormData();
+    for (const [k, v] of Object.entries(postURL.formData)) form.append(k, v);
+    form.append('file', blob, fileName);
+    return xhrUpload(postURL.url, form);
   }
 
   async function handleFiles(fileList) {
@@ -207,15 +245,26 @@
     for (const file of accepted) {
       ui.nameEl.textContent = file.name;
       try {
-        const { postURL } = await getUploadUrl(file.name, file.type);
-        const upload = uploadFile(file, postURL);
-        upload.onProgress = (p) => {
+        const { postURL, thumbURL } = await getUploadUrl(file.name, file.type);
+
+        const upload = xhrUpload(postURL.url, (function () {
+          const fd = new FormData();
+          for (const [k, v] of Object.entries(postURL.formData)) fd.append(k, v);
+          fd.append('file', file);
+          return fd;
+        })());
+        upload._onProgress = (p) => {
           const overall = (done + p) / accepted.length;
           ui.fillEl.style.width = Math.round(overall * 100) + '%';
         };
         const ok = await upload;
+
         if (ok) {
           done += 1;
+          const thumbBlob = await generateThumbnail(file);
+          if (thumbBlob && thumbURL) {
+            presignedUpload(thumbURL, thumbBlob, 'thumb.jpg', 'image/jpeg').catch(() => {});
+          }
         } else {
           showToast('Falha ao enviar "' + file.name + '".', 'error');
         }
@@ -249,8 +298,8 @@
   }
 
   function refreshGallerySoon() {
-    clearTimeout(refreshTimer);
-    refreshTimer = setTimeout(loadGallery, 800);
+    galleryFingerprint = '';
+    setTimeout(loadGallery, 1500);
   }
 
   /* ---------- Eventos ---------- */
@@ -262,13 +311,8 @@
     fileInput.value = '';
   });
 
-  document.addEventListener('visibilitychange', () => {
-    if (!document.hidden) loadGallery();
-  });
-
   /* ---------- Início ---------- */
 
   showSkeleton();
   loadGallery();
-  setInterval(loadGallery, 60000);
 })();

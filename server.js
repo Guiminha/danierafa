@@ -59,7 +59,9 @@ app.post('/api/upload-url', async (req, res) => {
 
     const safeName = path.basename(String(name || ''));
     const ext = path.extname(safeName).toLowerCase();
-    const objectName = `${MINIO_PREFIX}/${dateStamp()}-${randomId()}${ext}`;
+    const uniqueId = `${dateStamp()}-${randomId()}`;
+    const objectName = `${MINIO_PREFIX}/${uniqueId}${ext}`;
+    const thumbObjectName = `${MINIO_PREFIX}/thumbs/${uniqueId}.jpg`;
 
     const policy = new PostPolicy();
     policy.setBucket(MINIO_BUCKET);
@@ -69,7 +71,22 @@ app.post('/api/upload-url', async (req, res) => {
     policy.setContentLengthRange(1, MAX_FILE_MB * 1024 * 1024);
 
     const signed = await minioClient.presignedPostPolicy(policy);
-    res.json({ postURL: { url: signed.postURL, formData: signed.formData }, objectName });
+
+    const thumbPolicy = new PostPolicy();
+    thumbPolicy.setBucket(MINIO_BUCKET);
+    thumbPolicy.setKey(thumbObjectName);
+    thumbPolicy.setExpires(new Date(Date.now() + 60 * 60 * 1000));
+    thumbPolicy.setContentType('image/jpeg');
+    thumbPolicy.setContentLengthRange(1, 10 * 1024 * 1024);
+
+    const thumbSigned = await minioClient.presignedPostPolicy(thumbPolicy);
+
+    res.json({
+      postURL: { url: signed.postURL, formData: signed.formData },
+      objectName,
+      thumbURL: { url: thumbSigned.postURL, formData: thumbSigned.formData },
+      thumbObjectName
+    });
   } catch (err) {
     console.error('Erro ao gerar URL de upload:', err);
     res.status(500).json({ error: 'Erro interno ao preparar o upload.' });
@@ -86,15 +103,25 @@ app.get('/api/photos', async (req, res) => {
       objects.push({ name: obj.name, size: obj.size, lastModified: obj.lastModified });
     }
 
-    objects.sort((a, b) => new Date(b.lastModified) - new Date(a.lastModified));
+    const originals = objects.filter(o => !o.name.includes('/thumbs/'));
+    const thumbNames = new Set(objects.filter(o => o.name.includes('/thumbs/')).map(o => o.name));
 
-    const items = await Promise.all(objects.map(async (obj) => {
+    originals.sort((a, b) => new Date(b.lastModified) - new Date(a.lastModified));
+
+    const items = await Promise.all(originals.map(async (obj) => {
       const url = await minioClient.presignedGetObject(MINIO_BUCKET, obj.name, URL_EXPIRY);
+      const fileName = obj.name.replace(MINIO_PREFIX + '/', '');
+      const thumbPath = `${MINIO_PREFIX}/thumbs/${fileName.replace(/\.[^.]+$/, '.jpg')}`;
+      const hasThumb = thumbNames.has(thumbPath);
+      const thumbUrl = hasThumb
+        ? await minioClient.presignedGetObject(MINIO_BUCKET, thumbPath, URL_EXPIRY)
+        : null;
       return {
         name: obj.name,
         size: obj.size,
         lastModified: obj.lastModified,
         url,
+        thumbUrl,
         kind: ALLOWED_TYPES.image.includes(typeByExt(obj.name)) ? 'image' : 'video'
       };
     }));
