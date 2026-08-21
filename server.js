@@ -57,7 +57,9 @@ const upload = multer({
 
 app.use(cors());
 app.use(express.json());
-app.use(express.static(path.join(__dirname, 'public')));
+app.use(express.static(path.join(__dirname, 'public'), {
+  setHeaders: (res) => res.setHeader('Cache-Control', 'no-cache')
+}));
 
 const randomId = () => crypto.randomBytes(6).toString('hex');
 const dateStamp = () => new Date().toISOString().replace(/[-:T]/g, '').slice(0, 14);
