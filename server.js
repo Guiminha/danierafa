@@ -18,6 +18,10 @@ const MINIO_PREFIX = process.env.MINIO_PREFIX || 'uploads';
 const MAX_FILE_MB = parseInt(process.env.MAX_FILE_MB || '200', 10);
 const URL_EXPIRY = parseInt(process.env.URL_EXPIRY_SECONDS || (7 * 24 * 3600), 10);
 
+const MINIO_API_ENDPOINT = process.env.MINIO_API_ENDPOINT || MINIO_ENDPOINT;
+const MINIO_API_PORT = parseInt(process.env.MINIO_API_PORT || String(MINIO_PORT), 10);
+const MINIO_API_USE_SSL = (process.env.MINIO_API_USE_SSL ?? String(MINIO_USE_SSL)) === 'true';
+
 const ALLOWED_TYPES = {
   image: ['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/heic', 'image/heif', 'image/avif', 'image/bmp', 'image/tiff'],
   video: ['video/mp4', 'video/quicktime', 'video/x-m4v', 'video/webm', 'video/x-msvideo', 'video/x-matroska', 'video/3gpp', 'video/mpeg']
@@ -39,6 +43,14 @@ const minioClient = new Client({
   endPoint: MINIO_ENDPOINT,
   port: MINIO_PORT,
   useSSL: MINIO_USE_SSL,
+  accessKey: MINIO_ACCESS_KEY,
+  secretKey: MINIO_SECRET_KEY
+});
+
+const minioApiClient = new Client({
+  endPoint: MINIO_API_ENDPOINT,
+  port: MINIO_API_PORT,
+  useSSL: MINIO_API_USE_SSL,
   accessKey: MINIO_ACCESS_KEY,
   secretKey: MINIO_SECRET_KEY
 });
@@ -96,7 +108,7 @@ app.post('/api/upload-url', async (req, res) => {
 app.get('/api/photos', async (req, res) => {
   try {
     const objects = [];
-    const stream = minioClient.listObjectsV2(MINIO_BUCKET, MINIO_PREFIX + '/', true);
+    const stream = minioApiClient.listObjectsV2(MINIO_BUCKET, MINIO_PREFIX + '/', true);
 
     for await (const obj of stream) {
       if (!obj.name || obj.name.endsWith('/')) continue;
