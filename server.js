@@ -8,9 +8,6 @@ const { Client, PostPolicy } = require('minio');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-const MINIO_ENDPOINT = process.env.MINIO_ENDPOINT || '127.0.0.1';
-const MINIO_PORT = parseInt(process.env.MINIO_PORT || '9000', 10);
-const MINIO_USE_SSL = (process.env.MINIO_USE_SSL || 'false') === 'true';
 const MINIO_ACCESS_KEY = process.env.MINIO_ACCESS_KEY || '';
 const MINIO_SECRET_KEY = process.env.MINIO_SECRET_KEY || '';
 const MINIO_BUCKET = process.env.MINIO_BUCKET || 'wedding';
@@ -18,9 +15,12 @@ const MINIO_PREFIX = process.env.MINIO_PREFIX || 'uploads';
 const MAX_FILE_MB = parseInt(process.env.MAX_FILE_MB || '200', 10);
 const URL_EXPIRY = parseInt(process.env.URL_EXPIRY_SECONDS || (7 * 24 * 3600), 10);
 
-const MINIO_API_ENDPOINT = process.env.MINIO_API_ENDPOINT || MINIO_ENDPOINT;
-const MINIO_API_PORT = parseInt(process.env.MINIO_API_PORT || String(MINIO_PORT), 10);
-const MINIO_API_USE_SSL = (process.env.MINIO_API_USE_SSL ?? String(MINIO_USE_SSL)) === 'true';
+const MINIO_API_ENDPOINT = process.env.MINIO_API_ENDPOINT || '127.0.0.1';
+const MINIO_API_PORT = parseInt(process.env.MINIO_API_PORT || '9000', 10);
+const MINIO_API_USE_SSL = (process.env.MINIO_API_USE_SSL || 'false') === 'true';
+
+const MINIO_DOMAIN = process.env.MINIO_ENDPOINT || 'minio.danierafa.online';
+const MINIO_DOMAIN_SSL = (process.env.MINIO_USE_SSL || 'true') === 'true';
 
 const ALLOWED_TYPES = {
   image: ['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/heic', 'image/heif', 'image/avif', 'image/bmp', 'image/tiff'],
@@ -40,20 +40,18 @@ const isAllowed = (mimeType, name) => {
 };
 
 const minioClient = new Client({
-  endPoint: MINIO_ENDPOINT,
-  port: MINIO_PORT,
-  useSSL: MINIO_USE_SSL,
-  accessKey: MINIO_ACCESS_KEY,
-  secretKey: MINIO_SECRET_KEY
-});
-
-const minioApiClient = new Client({
   endPoint: MINIO_API_ENDPOINT,
   port: MINIO_API_PORT,
   useSSL: MINIO_API_USE_SSL,
   accessKey: MINIO_ACCESS_KEY,
   secretKey: MINIO_SECRET_KEY
 });
+
+const rewriteUrl = (url) => {
+  const protocol = MINIO_DOMAIN_SSL ? 'https' : 'http';
+  const pattern = new RegExp(`https?://${MINIO_API_ENDPOINT.replace(/\./g, '\\.')}:${MINIO_API_PORT}`, 'i');
+  return url.replace(pattern, `${protocol}://${MINIO_DOMAIN}`);
+};
 
 app.use(cors());
 app.use(express.json());
@@ -94,9 +92,9 @@ app.post('/api/upload-url', async (req, res) => {
     const thumbSigned = await minioClient.presignedPostPolicy(thumbPolicy);
 
     res.json({
-      postURL: { url: signed.postURL, formData: signed.formData },
+      postURL: { url: rewriteUrl(signed.postURL), formData: signed.formData },
       objectName,
-      thumbURL: { url: thumbSigned.postURL, formData: thumbSigned.formData },
+      thumbURL: { url: rewriteUrl(thumbSigned.postURL), formData: thumbSigned.formData },
       thumbObjectName
     });
   } catch (err) {
@@ -108,7 +106,7 @@ app.post('/api/upload-url', async (req, res) => {
 app.get('/api/photos', async (req, res) => {
   try {
     const objects = [];
-    const stream = minioApiClient.listObjectsV2(MINIO_BUCKET, MINIO_PREFIX + '/', true);
+    const stream = minioClient.listObjectsV2(MINIO_BUCKET, MINIO_PREFIX + '/', true);
 
     for await (const obj of stream) {
       if (!obj.name || obj.name.endsWith('/')) continue;
@@ -121,12 +119,12 @@ app.get('/api/photos', async (req, res) => {
     originals.sort((a, b) => new Date(b.lastModified) - new Date(a.lastModified));
 
     const items = await Promise.all(originals.map(async (obj) => {
-      const url = await minioClient.presignedGetObject(MINIO_BUCKET, obj.name, URL_EXPIRY);
+      const url = rewriteUrl(await minioClient.presignedGetObject(MINIO_BUCKET, obj.name, URL_EXPIRY));
       const fileName = obj.name.replace(MINIO_PREFIX + '/', '');
       const thumbPath = `${MINIO_PREFIX}/thumbs/${fileName.replace(/\.[^.]+$/, '.jpg')}`;
       const hasThumb = thumbNames.has(thumbPath);
       const thumbUrl = hasThumb
-        ? await minioClient.presignedGetObject(MINIO_BUCKET, thumbPath, URL_EXPIRY)
+        ? rewriteUrl(await minioClient.presignedGetObject(MINIO_BUCKET, thumbPath, URL_EXPIRY))
         : null;
       return {
         name: obj.name,
