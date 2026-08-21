@@ -213,8 +213,12 @@
           const overall = (done + p) / accepted.length;
           ui.fillEl.style.width = Math.round(overall * 100) + '%';
         };
-        await upload;
-        done += 1;
+        const ok = await upload;
+        if (ok) {
+          done += 1;
+        } else {
+          showToast('Falha ao enviar "' + file.name + '".', 'error');
+        }
         ui.counterEl.textContent = done + '/' + accepted.length;
         ui.fillEl.style.width = Math.round((done / accepted.length) * 100) + '%';
       } catch (err) {
