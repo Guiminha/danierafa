@@ -2,8 +2,11 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
+const fs = require('fs');
+const os = require('os');
 const crypto = require('crypto');
-const { Client, PostPolicy } = require('minio');
+const multer = require('multer');
+const { Client } = require('minio');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -18,9 +21,6 @@ const URL_EXPIRY = parseInt(process.env.URL_EXPIRY_SECONDS || (7 * 24 * 3600), 1
 const MINIO_API_ENDPOINT = process.env.MINIO_API_ENDPOINT || '127.0.0.1';
 const MINIO_API_PORT = parseInt(process.env.MINIO_API_PORT || '9000', 10);
 const MINIO_API_USE_SSL = (process.env.MINIO_API_USE_SSL || 'false') === 'true';
-
-const MINIO_DOMAIN = process.env.MINIO_ENDPOINT || 'minio.danierafa.online';
-const MINIO_DOMAIN_SSL = (process.env.MINIO_USE_SSL || 'true') === 'true';
 
 const ALLOWED_TYPES = {
   image: ['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/heic', 'image/heif', 'image/avif', 'image/bmp', 'image/tiff'],
@@ -47,11 +47,13 @@ const minioClient = new Client({
   secretKey: MINIO_SECRET_KEY
 });
 
-const rewriteUrl = (url) => {
-  const protocol = MINIO_DOMAIN_SSL ? 'https' : 'http';
-  const pattern = new RegExp(`https?://${MINIO_API_ENDPOINT.replace(/\./g, '\\.')}:${MINIO_API_PORT}`, 'i');
-  return url.replace(pattern, `${protocol}://${MINIO_DOMAIN}`);
-};
+const UPLOAD_DIR = path.join(os.tmpdir(), 'wedding-uploads');
+if (!fs.existsSync(UPLOAD_DIR)) fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+
+const upload = multer({
+  dest: UPLOAD_DIR,
+  limits: { fileSize: MAX_FILE_MB * 1024 * 1024 }
+});
 
 app.use(cors());
 app.use(express.json());
@@ -60,46 +62,52 @@ app.use(express.static(path.join(__dirname, 'public')));
 const randomId = () => crypto.randomBytes(6).toString('hex');
 const dateStamp = () => new Date().toISOString().replace(/[-:T]/g, '').slice(0, 14);
 
-app.post('/api/upload-url', async (req, res) => {
+app.post('/api/upload-url', (req, res) => {
+  const { name, type } = req.body || {};
+  if (!isAllowed(type, name)) {
+    return res.status(400).json({ error: 'Apenas fotos e vídeos são permitidos.' });
+  }
+  const safeName = path.basename(String(name || ''));
+  const ext = path.extname(safeName).toLowerCase();
+  const uniqueId = `${dateStamp()}-${randomId()}`;
+  const objectName = `${MINIO_PREFIX}/${uniqueId}${ext}`;
+  const thumbObjectName = `${MINIO_PREFIX}/thumbs/${uniqueId}.jpg`;
+  res.json({ objectName, thumbObjectName });
+});
+
+const forwardToMinio = async (req, res) => {
   try {
-    const { name, type } = req.body || {};
-    if (!isAllowed(type, name)) {
-      return res.status(400).json({ error: 'Apenas fotos e vídeos são permitidos.' });
+    if (!req.file) return res.status(400).json({ error: 'Arquivo não enviado.' });
+    const objectName = req.body.objectName;
+    if (!objectName || !objectName.startsWith(MINIO_PREFIX + '/')) {
+      return res.status(400).json({ error: 'Destino inválido.' });
     }
-
-    const safeName = path.basename(String(name || ''));
-    const ext = path.extname(safeName).toLowerCase();
-    const uniqueId = `${dateStamp()}-${randomId()}`;
-    const objectName = `${MINIO_PREFIX}/${uniqueId}${ext}`;
-    const thumbObjectName = `${MINIO_PREFIX}/thumbs/${uniqueId}.jpg`;
-
-    const policy = new PostPolicy();
-    policy.setBucket(MINIO_BUCKET);
-    policy.setKey(objectName);
-    policy.setExpires(new Date(Date.now() + 60 * 60 * 1000));
-    policy.setContentType(type);
-    policy.setContentLengthRange(1, MAX_FILE_MB * 1024 * 1024);
-
-    const signed = await minioClient.presignedPostPolicy(policy);
-
-    const thumbPolicy = new PostPolicy();
-    thumbPolicy.setBucket(MINIO_BUCKET);
-    thumbPolicy.setKey(thumbObjectName);
-    thumbPolicy.setExpires(new Date(Date.now() + 60 * 60 * 1000));
-    thumbPolicy.setContentType('image/jpeg');
-    thumbPolicy.setContentLengthRange(1, 10 * 1024 * 1024);
-
-    const thumbSigned = await minioClient.presignedPostPolicy(thumbPolicy);
-
-    res.json({
-      postURL: { url: rewriteUrl(signed.postURL), formData: signed.formData },
-      objectName,
-      thumbURL: { url: rewriteUrl(thumbSigned.postURL), formData: thumbSigned.formData },
-      thumbObjectName
-    });
+    const metaData = { 'Content-Type': req.file.mimetype };
+    await minioClient.fPutObject(MINIO_BUCKET, objectName, req.file.path, metaData);
+    fs.unlinkSync(req.file.path);
+    res.json({ ok: true });
   } catch (err) {
-    console.error('Erro ao gerar URL de upload:', err);
-    res.status(500).json({ error: 'Erro interno ao preparar o upload.' });
+    console.error('Erro ao enviar para o MinIO:', err);
+    res.status(500).json({ error: 'Falha ao enviar o arquivo.' });
+  }
+};
+
+app.post('/api/upload', upload.single('file'), forwardToMinio);
+app.post('/api/upload-thumb', upload.single('file'), forwardToMinio);
+
+app.get('/api/file', async (req, res) => {
+  const name = req.query.name;
+  if (!name || !name.startsWith(MINIO_PREFIX + '/')) {
+    return res.status(400).json({ error: 'Arquivo inválido.' });
+  }
+  try {
+    const stat = await minioClient.statObject(MINIO_BUCKET, name);
+    res.setHeader('Content-Type', stat.metaData['content-type'] || 'application/octet-stream');
+    res.setHeader('Cache-Control', 'public, max-age=86400');
+    const stream = await minioClient.getObject(MINIO_BUCKET, name);
+    stream.pipe(res);
+  } catch (err) {
+    res.status(404).json({ error: 'Arquivo não encontrado.' });
   }
 });
 
@@ -118,23 +126,19 @@ app.get('/api/photos', async (req, res) => {
 
     originals.sort((a, b) => new Date(b.lastModified) - new Date(a.lastModified));
 
-    const items = await Promise.all(originals.map(async (obj) => {
-      const url = rewriteUrl(await minioClient.presignedGetObject(MINIO_BUCKET, obj.name, URL_EXPIRY));
+    const items = originals.map((obj) => {
       const fileName = obj.name.replace(MINIO_PREFIX + '/', '');
       const thumbPath = `${MINIO_PREFIX}/thumbs/${fileName.replace(/\.[^.]+$/, '.jpg')}`;
       const hasThumb = thumbNames.has(thumbPath);
-      const thumbUrl = hasThumb
-        ? rewriteUrl(await minioClient.presignedGetObject(MINIO_BUCKET, thumbPath, URL_EXPIRY))
-        : null;
       return {
         name: obj.name,
         size: obj.size,
         lastModified: obj.lastModified,
-        url,
-        thumbUrl,
+        url: `/api/file?name=${encodeURIComponent(obj.name)}`,
+        thumbUrl: hasThumb ? `/api/file?name=${encodeURIComponent(thumbPath)}` : null,
         kind: ALLOWED_TYPES.image.includes(typeByExt(obj.name)) ? 'image' : 'video'
       };
-    }));
+    });
 
     res.json({ items });
   } catch (err) {

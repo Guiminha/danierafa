@@ -186,7 +186,7 @@
     };
   }
 
-  async function getUploadUrl(name, type) {
+  async function getUploadKeys(name, type) {
     const res = await fetch('/api/upload-url', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -199,7 +199,7 @@
     return data;
   }
 
-  function xhrUpload(url, file) {
+  function uploadFile(url, file, objectName) {
     return new Promise((resolve, reject) => {
       const xhr = new XMLHttpRequest();
       xhr.open('POST', url);
@@ -210,15 +210,11 @@
       });
       xhr.onload = () => resolve(xhr.status >= 200 && xhr.status < 300);
       xhr.onerror = () => reject(new Error('Falha de rede ao enviar.'));
-      xhr.send(file);
+      const fd = new FormData();
+      fd.append('file', file);
+      fd.append('objectName', objectName);
+      xhr.send(fd);
     });
-  }
-
-  function presignedUpload(postURL, blob, fileName, contentType) {
-    const form = new FormData();
-    for (const [k, v] of Object.entries(postURL.formData)) form.append(k, v);
-    form.append('file', blob, fileName);
-    return xhrUpload(postURL.url, form);
   }
 
   async function handleFiles(fileList) {
@@ -245,14 +241,9 @@
     for (const file of accepted) {
       ui.nameEl.textContent = file.name;
       try {
-        const { postURL, thumbURL } = await getUploadUrl(file.name, file.type);
+        const { objectName, thumbObjectName } = await getUploadKeys(file.name, file.type);
 
-        const upload = xhrUpload(postURL.url, (function () {
-          const fd = new FormData();
-          for (const [k, v] of Object.entries(postURL.formData)) fd.append(k, v);
-          fd.append('file', file);
-          return fd;
-        })());
+        const upload = uploadFile('/api/upload', file, objectName);
         upload._onProgress = (p) => {
           const overall = (done + p) / accepted.length;
           ui.fillEl.style.width = Math.round(overall * 100) + '%';
@@ -262,8 +253,8 @@
         if (ok) {
           done += 1;
           const thumbBlob = await generateThumbnail(file);
-          if (thumbBlob && thumbURL) {
-            presignedUpload(thumbURL, thumbBlob, 'thumb.jpg', 'image/jpeg').catch(() => {});
+          if (thumbBlob && thumbObjectName) {
+            uploadFile('/api/upload-thumb', thumbBlob, thumbObjectName).catch(() => {});
           }
         } else {
           showToast('Falha ao enviar "' + file.name + '".', 'error');
